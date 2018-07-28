@@ -1,0 +1,19 @@
+image: microsoft/aspnetcore-build
+
+stages:
+  - deploy
+
+release:
+  stage: deploy
+  only:
+    - master
+  artifacts:
+    paths:
+      - publish/
+  script:
+    # The output path is relative to the position of the csproj-file
+<<<<<<< HEAD
+    - dotnet publish -c Release -o ../publish HelpDesk.csproj
+=======
+    - dotnet publish -c Release -o ../publish Helpdesk/HelpDesk.csproj
+>>>>>>> 932ec3bcb5a21fa9af8c90f7b3655ad8f278d16c
