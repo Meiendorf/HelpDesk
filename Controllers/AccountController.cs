@@ -34,6 +34,45 @@ namespace HelpDesk.Controllers
             db = context;
             config = configuration;
         }
+        [ActionName("changeRole")]
+        [Authorize(Roles = "admin")]
+        public async Task<IActionResult> ChangeRole([FromForm] string username, [FromForm] int roleId)
+        {
+            var client = await db.Clients.FirstOrDefaultAsync(x => x.Email == username);
+            if(client != null)
+            {
+                if (roleId > 3)
+                {
+                    client.RoleId = roleId;
+                }
+                else
+                {
+                    return BadRequest("Invalid client role!");
+                }
+                db.Clients.Update(client);
+            }
+            else
+            {
+                var user = await db.Users.FirstOrDefaultAsync(x => x.Email == username);
+                if(user == null)
+                {
+                    return BadRequest("No user was found by provided username!");
+                }
+                if (roleId < 4 && roleId > 0)
+                {
+                    user.RoleId = roleId;
+                }
+                else
+                {
+                    return BadRequest("Invalid user role!");
+                }
+                db.Users.Update(user);
+            }
+            await db.SaveChangesAsync();
+            await CloseAllSessionsAsync(username);
+            return Ok();
+        }
+
         [ActionName("token")]
         [HttpPost]
         public async Task Token([FromForm] string username, [FromForm] string password)
@@ -51,29 +90,78 @@ namespace HelpDesk.Controllers
                 await Response.WriteAsync("Invalid username or password.");
                 return;
             }
-            var jwtSettings = config.GetSection("JWTAuthentication");
-            var now = DateTime.UtcNow;
-            // создаем JWT-токен
-            var jwt = new JwtSecurityToken(
-                    issuer: jwtSettings["Issuer"],
-                    audience: jwtSettings["Audience"],
-                    notBefore: now,
-                    claims: identity.Claims,
-                    expires: now.Add(TimeSpan.FromMinutes(Convert.ToDouble(jwtSettings["Lifetime"]))),
-                    signingCredentials: new SigningCredentials(new SymmetricSecurityKey(
-                                Encoding.ASCII.GetBytes(jwtSettings["Key"])), SecurityAlgorithms.HmacSha256));
-
-            var encodedJwt = new JwtSecurityTokenHandler().WriteToken(jwt);
-
-            var response = new
-            {
-                access_token = encodedJwt,
-                role = identity.Claims.First(x => x.Type == ClaimsIdentity.DefaultRoleClaimType).Value,
-                username = identity.Name
-            };
-
+            var response = await GenerateTokenResponse(identity);
+  
             Response.ContentType = "application/json";
             await Response.WriteAsync(JsonConvert.SerializeObject(response, new JsonSerializerSettings { Formatting = Formatting.Indented }));
+        }
+       
+        [ActionName("refresh")]
+        [HttpPost]
+        public async Task<IActionResult> RefreshToken([FromForm] string refreshToken)
+        {
+            if (refreshToken == null)
+            {
+                return BadRequest("Refresh token is required!");
+            }
+            var token = await db.RefreshTokens.FirstOrDefaultAsync(x => x.Token == refreshToken);
+            if (token == null || !token.IsActive)
+            {
+                return BadRequest("Token is invalid!");
+            }
+            AppUser user;
+            if(token.UserId != null)
+            {
+                user = await db.Users.Include(x => x.Role).FirstOrDefaultAsync(x => x.Id == token.UserId);
+            }
+            else
+            {
+                user = await db.Clients.Include(x => x.Role).FirstOrDefaultAsync(x => x.Id == token.ClientId);
+            }
+            if(user == null)
+            {
+                return BadRequest("Token is invalid!");
+            }
+            token.IsActive = false;
+            db.RefreshTokens.Update(token);
+            await db.SaveChangesAsync();
+            var time = DateTime.Now - token.Created;
+            if(time.TotalMinutes > token.Expire)
+            {
+                return BadRequest("Token expired!");
+            }
+            return new JsonResult(await GenerateTokenResponse(GetIdentityObject(user)));
+        }
+        
+        [ActionName("logout")]
+        [HttpPost]
+        public async Task<IActionResult> Logout([FromForm] string refreshToken)
+        {
+            if (refreshToken == null)
+            {
+                return BadRequest("Refresh token is required!");
+            }
+            var token = await db.RefreshTokens.FirstOrDefaultAsync(x => x.Token == refreshToken);
+            if (token == null || !token.IsActive)
+            {
+                return BadRequest("Token is invalid!");
+            }
+            token.IsActive = false;
+            db.RefreshTokens.Update(token);
+            await db.SaveChangesAsync();
+            return Ok();
+        }
+
+        [ActionName("closeall")]
+        [HttpPost]
+        [Authorize]
+        public async Task<IActionResult> CloseAllSessions()
+        {
+            if(!await CloseAllSessionsAsync(User.Identity.Name))
+            {
+                return BadRequest();
+            }
+            return Ok();
         }
 
         [ActionName("genuserlink")]
@@ -254,7 +342,7 @@ namespace HelpDesk.Controllers
             return CreatedAtAction("GetClient", "Client", new { id = client.Id }, client);
         }
 
-        private ClaimsIdentity GetIdentity(string email, string password)
+        private IdentityObject GetIdentity(string email, string password)
         {
             AppUser user = db.Clients.Include(x => x.Role).FirstOrDefault(x => x.Email == email);
             if (user == null)
@@ -268,18 +356,104 @@ namespace HelpDesk.Controllers
                 {
                     return null;
                 }
-                var claims = new List<Claim>
+                return GetIdentityObject(user);
+            }
+            return null;
+        }
+        private async Task<bool> CloseAllSessionsAsync(string username)
+        {
+            AppUser user = await db.Users.FirstOrDefaultAsync(x => x.Email == username);
+            var isClient = false;
+            if (user == null)
+            {
+                isClient = true;
+                user = await db.Clients.FirstOrDefaultAsync(x => x.Email == username);
+            }
+            if (user == null)
+            {
+                return false;
+            }
+            if (isClient)
+            {
+                db.Database.ExecuteSqlCommand("UPDATE RefreshTokens SET IsActive ='False' WHERE ClientId=" + user.Id);
+
+            }
+            else
+            {
+                db.Database.ExecuteSqlCommand("UPDATE RefreshTokens SET IsActive='False' WHERE UserId=" + user.Id);
+            }
+            return true;
+        }
+        private async Task<TokenResponse> GenerateTokenResponse(IdentityObject identity)
+        {
+            var jwtSettings = config.GetSection("JWTAuthentication");
+            var now = DateTime.UtcNow;
+            // создаем JWT-токен
+            var jwt = new JwtSecurityToken(
+                    issuer: jwtSettings["Issuer"],
+                    audience: jwtSettings["Audience"],
+                    notBefore: now,
+                    claims: identity.Claims.Claims,
+                    expires: now.Add(TimeSpan.FromMinutes(Convert.ToDouble(jwtSettings["Lifetime"]))),
+                    signingCredentials: new SigningCredentials(new SymmetricSecurityKey(
+                                Encoding.ASCII.GetBytes(jwtSettings["Key"])), SecurityAlgorithms.HmacSha256));
+
+            var encodedJwt = new JwtSecurityTokenHandler().WriteToken(jwt);
+            var refreshToken = new RefreshToken()
+            {
+                IpAdress = HttpContext.Connection.RemoteIpAddress.ToString(),
+                Expire = Convert.ToInt32(jwtSettings["RefreshLifetime"]),
+                IsActive = true,
+                Token = Guid.NewGuid().ToString("N"),
+                Created = DateTime.Now
+            };
+            if (identity.User.RoleId > 3)
+            {
+                refreshToken.ClientId = identity.User.Id;
+            }
+            else
+            {
+                refreshToken.UserId = identity.User.Id;
+            }
+            db.RefreshTokens.Add(refreshToken);
+            await db.SaveChangesAsync();
+            var response = new TokenResponse
+            {
+                access_token = encodedJwt,
+                role = identity.User.Role.Name,
+                username = identity.User.Email,
+                refresh_token = refreshToken.Token
+            };
+            return response;
+        }
+        private IdentityObject GetIdentityObject (AppUser user)
+        {
+            var claims = new List<Claim>
                 {
                     new Claim(ClaimsIdentity.DefaultNameClaimType, user.Email),
                     new Claim(ClaimsIdentity.DefaultRoleClaimType, user.Role.Name)
                 };
-                ClaimsIdentity claimsIdentity =
-                new ClaimsIdentity(claims, "Token", ClaimsIdentity.DefaultNameClaimType,
-                    ClaimsIdentity.DefaultRoleClaimType);
-                return claimsIdentity;
-            }
-            return null;
+            ClaimsIdentity claimsIdentity =
+            new ClaimsIdentity(claims, "Token", ClaimsIdentity.DefaultNameClaimType,
+                ClaimsIdentity.DefaultRoleClaimType);
+            return new IdentityObject()
+            {
+                Claims = claimsIdentity,
+                User = user
+            };
         }
        
+    }
+    public class TokenResponse
+    {
+        public string access_token { get; set; }
+        public string refresh_token { get; set; }
+        public string role { get; set; }
+        public string username { get; set; }
+    }
+    public class IdentityObject
+    {
+        public ClaimsIdentity Claims { get; set; }
+        public AppUser User { get; set; }
     }
 }

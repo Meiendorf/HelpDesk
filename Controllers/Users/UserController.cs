@@ -182,8 +182,10 @@ namespace HelpDesk.Controllers.Users
                     return BadRequest("Can't create user for other departament");
                 }
             }
-
-            user.RoleId = 1;
+            if(user.RoleId != 2 && user.RoleId != 3)
+            {
+                user.RoleId = 1;
+            }
             user.StatusId = 1;
 
             var cl = _context.Clients.FirstOrDefault(x => x.Email == user.Email);

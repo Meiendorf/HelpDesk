@@ -61,6 +61,7 @@ namespace HelpDesk
                             IssuerSigningKey = new SymmetricSecurityKey(
                                 Encoding.ASCII.GetBytes(Configuration["JWTAuthentication:Key"])),
                             ValidateIssuerSigningKey = true,
+                            ValidateLifetime = true,
                             ClockSkew = TimeSpan.Zero
                         };
                     });

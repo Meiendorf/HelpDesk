@@ -34,6 +34,7 @@ namespace HelpDesk.Models.Additional
         public DbSet<Priority> Priorities { get; set; }
         public DbSet<Role> Roles { get; set; }
         public DbSet<RegistrationToken> RegistrationTokens { get; set; }
+        public DbSet<RefreshToken> RefreshTokens { get; set; }
         /***     Common    ***/
 
         /*** Notifications ***/
