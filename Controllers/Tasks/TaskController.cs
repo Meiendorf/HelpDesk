@@ -140,7 +140,7 @@ namespace HelpDesk.Controllers.Tasks
             {
                 throw e;
             }
-
+            await StaticHelper.RaiseEvent(EventTypes.TaskAdded, task, db);
             return CreatedAtAction("GetTicketTask", new { id = task.Id }, task);
         }
 
@@ -200,7 +200,7 @@ namespace HelpDesk.Controllers.Tasks
             {
                 return BadRequest("Some of the fields are incorrect!");
             }
-
+            await StaticHelper.RaiseEvent(EventTypes.TaskChanged, oldTask, db);
             return NoContent();
         }
 

@@ -115,7 +115,7 @@ namespace HelpDesk.Controllers.Tickets
             {
                 throw e;
             }
-
+            await StaticHelper.RaiseEvent(EventTypes.TicketAdded, ticket, db);
             return CreatedAtAction("GetTicket", new { id = ticket.Id }, ticket);
         }
 
@@ -131,7 +131,6 @@ namespace HelpDesk.Controllers.Tickets
             }
             var email = User.Identity.Name;
             AppUser user;
-            var companyId = 0;
             if(role == "client" || role == "superclient")
             {
                 if(oldTicket.StatusId != 5)
@@ -160,7 +159,7 @@ namespace HelpDesk.Controllers.Tickets
             var statusId = ticket.StatusId;
             if(statusId != null)
             {
-                if(role != "admin" && ((statusId == 1) || (statusId == 2)))
+                if(role != "admin" && statusId == 2)
                 {
                     statusId = null;
                 }
@@ -186,9 +185,15 @@ namespace HelpDesk.Controllers.Tickets
                 return BadRequest("Some values are not allowed by SLA, associated with company of client");
             }
             db.Entry(oldTicket).State = EntityState.Modified;
- 
-            await db.SaveChangesAsync();
-           
+            try
+            {
+                await db.SaveChangesAsync();
+            }
+            catch
+            {
+                return BadRequest("Invalid data!");
+            }
+            await StaticHelper.RaiseEvent(EventTypes.TicketChanged, oldTicket, db);
             return NoContent();
         }
 

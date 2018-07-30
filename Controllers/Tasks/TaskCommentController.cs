@@ -149,7 +149,7 @@ namespace HelpDesk.Controllers.Tasks
       
             _context.TaskComments.Add(taskComment);
             await _context.SaveChangesAsync();
-
+            await StaticHelper.RaiseEvent(EventTypes.TaskCommented, task, _context);
             return CreatedAtAction("GetTaskComment", new { id = taskComment.Id }, taskComment);
         }
 

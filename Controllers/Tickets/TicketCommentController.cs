@@ -207,7 +207,7 @@ namespace HelpDesk.Controllers.Tickets
 
             _context.TicketComments.Add(ticketComment);
             await _context.SaveChangesAsync();
-
+            await StaticHelper.RaiseEvent(EventTypes.TicketComment, ticket, _context);
             return CreatedAtAction("GetTicketComment", new { id = ticketComment.Id }, ticketComment);
         }
 

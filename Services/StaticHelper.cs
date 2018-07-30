@@ -69,6 +69,11 @@ namespace HelpDesk.Services
         }
         public static async Task<bool> RaiseEvent(EventTypes type, object data, AppDbContext db)
         {
+            var enabled = Convert.ToBoolean(Startup.Configuration["NotificationsEnabled"]);
+            if (!enabled)
+            {
+                return false;
+            }
             var _event = new Event()
             {
                 Date = DateTime.Now,
