@@ -34,8 +34,10 @@ namespace HelpDesk.Controllers
             db = context;
             config = configuration;
         }
+
         [ActionName("changeRole")]
         [Authorize(Roles = "admin")]
+        [HttpPost]
         public async Task<IActionResult> ChangeRole([FromForm] string username, [FromForm] int roleId)
         {
             var client = await db.Clients.FirstOrDefaultAsync(x => x.Email == username);
